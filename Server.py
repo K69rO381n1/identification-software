@@ -9,6 +9,9 @@ from captcha.image import ImageCaptcha
 from captcha.audio import AudioCaptcha
 from random import choice
 
+import PocketProtocol
+
+
 NUM_OF_CHARS_IN_CAPTCHA = 6
 CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
                     'u', 'U', 't', 'T', 's', 'S', 'r', 'R', 'q', 'Q',
@@ -60,34 +63,11 @@ HASH_SUFFIX = "134gs2d4gsa"
 IMAGE_MODE = "L"
 IMAGE_COLORS = "RGBA"
 
-NUM_OF_DIGITS_IN_DATA_SIZE = 10
-NUM_OF_DIGITS_IN_MESSAGE_TYPE = 4
 MAX_TRANSFER_AT_ONCE = 2048
 
 
 class MainServer(socket.socket):
-    """
-    Send / Receive protocol:
-        Every data will be transferred in its *full form,
-        wrapped with header that contains 10 digits for that data length and 4 digits for the msg purpose.
-        [ length (10 dig) : Flag (4 dig) : data ]
 
-        Length: integer from b'0000000000' to b'999999999' (almost 1 GB, more then enough...)
-        Flag: One of the following values,
-
-            For client:
-
-                b'0':   Request for captcha image.
-                        Data expected: None
-                b'1':   
-
-
-            For server:
-
-                b'0' Captcha response from server
-
-        * For example, Image or Text files will keep their completeness (including any header / footer) and send As-Is.
-    """
     def __init__(self):
         super().__init__()
 
@@ -133,9 +113,10 @@ class MainServer(socket.socket):
 
         try:
             while True:
-                input = MainServer._recvfrom(client)
-                if input[0] == b'1':
+                client_input = MainServer._recvfrom(client)
+                if client_input[0] == b'1':
                     pass
+                # TODO: Complete...
         finally:
             client.close()
 
@@ -185,9 +166,9 @@ class MainServer(socket.socket):
     # ************************************** Static functions ***********************************
 
     @staticmethod
-    def _sendto(client: socket.socket, data):
+    def _sendto(client: socket.socket, data, flag):
         """
-        This method sends to the client the data Using the protocol defined in the description.
+        This method sends to the client the data Using the protocol defined in file PocketProtocol.
         NOTE: Any data sending to clients should be though this method!
 
         :param client:  The data's addressee
@@ -195,33 +176,32 @@ class MainServer(socket.socket):
         """
 
         total_sent = 0
+        packet = PocketProtocol.wrap_data(data, flag)
 
-        while total_sent < len(data):
+        while total_sent < len(packet):
 
             total_sent += client.send(
-                data
-                [total_sent:min(
+                packet[total_sent: min(
                                 total_sent + MAX_TRANSFER_AT_ONCE,
-                                MainServer.round_to_lower_power_of_2(len(data)))])
+                                MainServer._round_to_lower_power_of_2(len(packet)))])
 
     @staticmethod
     def _recvfrom(client: socket.socket) -> bytes:
         """
-        This method receives from the client data Using the protocol defined in the description.
+        This method receives from the client data and unwrap it using the protocol defined in file PocketProtocol.
         NOTE: Any data receiving from clients should be though this method!
 
         :param client:  The data's sender.
-        :param data:    The data sent by the client.
         """
 
         data = b''
-        size = client.recvfrom(NUM_OF_DIGITS_IN_DATA_SIZE) + NUM_OF_DIGITS_IN_MESSAGE_TYPE
+        size = client.recvfrom(PocketProtocol.NUM_OF_DIGITS_IN_DATA_SIZE) + PocketProtocol.NUM_OF_DIGITS_IN_MESSAGE_TYPE
 
         while len(data) < size:
             data += client.recv(
                 min(
                     MAX_TRANSFER_AT_ONCE,
-                    MainServer.round_to_lower_power_of_2(size - len(data))))
+                    MainServer._round_to_lower_power_of_2(size - len(data))))
         return data
 
     @staticmethod
@@ -245,13 +225,5 @@ class MainServer(socket.socket):
         return hash(hash(HASH_PREFIX + password + HASH_SUFFIX))
 
     @staticmethod
-    def round_to_lower_power_of_2(buffer_size):
+    def _round_to_lower_power_of_2(buffer_size):
         return 1 << (buffer_size.bit_length() - 1)
-
-    @staticmethod
-    def wrap_data(data: bytes) -> bytes:
-        return MainServer.pad_data_size(len(data)) + data
-
-    @staticmethod
-    def pad_data_size(size: int) -> bytes:
-        return bytes('{0:0' + str(NUM_OF_DIGITS_IN_DATA_SIZE) + 'd}'.format(size))
