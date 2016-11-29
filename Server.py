@@ -60,8 +60,34 @@ HASH_SUFFIX = "134gs2d4gsa"
 IMAGE_MODE = "L"
 IMAGE_COLORS = "RGBA"
 
+NUM_OF_DIGITS_IN_DATA_SIZE = 10
+NUM_OF_DIGITS_IN_MESSAGE_TYPE = 4
+MAX_TRANSFER_AT_ONCE = 2048
+
 
 class MainServer(socket.socket):
+    """
+    Send / Receive protocol:
+        Every data will be transferred in its *full form,
+        wrapped with header that contains 10 digits for that data length and 4 digits for the msg purpose.
+        [ length (10 dig) : Flag (4 dig) : data ]
+
+        Length: integer from b'0000000000' to b'999999999' (almost 1 GB, more then enough...)
+        Flag: One of the following values,
+
+            For client:
+
+                b'0':   Request for captcha image.
+                        Data expected: None
+                b'1':   
+
+
+            For server:
+
+                b'0' Captcha response from server
+
+        * For example, Image or Text files will keep their completeness (including any header / footer) and send As-Is.
+    """
     def __init__(self):
         super().__init__()
 
@@ -108,7 +134,8 @@ class MainServer(socket.socket):
         try:
             while True:
                 input = MainServer._recvfrom(client)
-                # TODO: Handle users request...
+                if input[0] == b'1':
+                    pass
         finally:
             client.close()
 
@@ -151,32 +178,6 @@ class MainServer(socket.socket):
 
     # ************************************** Override methods ***********************************
 
-    @staticmethod
-    def _sendto(client_socket, data, flags=None, *args, **kwargs):
-        total_sent = 0
-        while total_sent < len(data):
-            sent = client_socket.send(data[total_sent:], flags, args, kwargs)
-            if sent == 0:
-                raise RuntimeError("socket connection broken")
-            total_sent = total_sent + sent
-
-    @staticmethod
-    def _recvfrom(client_socket):
-        chunks = []
-        bytes_recv = 0
-        address = ()
-
-        while chunks[len(chunks)-1] != b'\0':
-            chunk, address = client_socket.recv(2048)
-
-            if chunk == b'':
-                raise RuntimeError("socket connection broken")
-
-            chunks.append(chunk)
-            bytes_recv += len(chunk)
-
-        return b''.join(chunks), address
-
     def close(self):
         super(socket.socket, self).close()
         self.connection_to_db.close()
@@ -184,18 +185,48 @@ class MainServer(socket.socket):
     # ************************************** Static functions ***********************************
 
     @staticmethod
-    def random_text(size):
-        return "".join([choice(CAPTCHA_ALPHABET) for _ in range(size)])
+    def _sendto(client: socket.socket, data):
+        """
+        This method sends to the client the data Using the protocol defined in the description.
+        NOTE: Any data sending to clients should be though this method!
+
+        :param client:  The data's addressee
+        :param data:    This data will be send to the client.
+        """
+
+        total_sent = 0
+
+        while total_sent < len(data):
+
+            total_sent += client.send(
+                data
+                [total_sent:min(
+                                total_sent + MAX_TRANSFER_AT_ONCE,
+                                MainServer.round_to_lower_power_of_2(len(data)))])
 
     @staticmethod
-    def image2bytes(image_path):
-        image_as_bytes = [image.height, image.width]
+    def _recvfrom(client: socket.socket) -> bytes:
+        """
+        This method receives from the client data Using the protocol defined in the description.
+        NOTE: Any data receiving from clients should be though this method!
 
-        for i in range(image.height):
-            for j in range(image.width):
-                image_as_bytes.append(image.getpixel((i, j)))
+        :param client:  The data's sender.
+        :param data:    The data sent by the client.
+        """
 
-        return image_as_bytes
+        data = b''
+        size = client.recvfrom(NUM_OF_DIGITS_IN_DATA_SIZE) + NUM_OF_DIGITS_IN_MESSAGE_TYPE
+
+        while len(data) < size:
+            data += client.recv(
+                min(
+                    MAX_TRANSFER_AT_ONCE,
+                    MainServer.round_to_lower_power_of_2(size - len(data))))
+        return data
+
+    @staticmethod
+    def random_text(size):
+        return "".join([choice(CAPTCHA_ALPHABET) for _ in range(size)])
 
     @staticmethod
     def bytes2images(image_as_bytes):
@@ -213,4 +244,14 @@ class MainServer(socket.socket):
     def encrypt(password):
         return hash(hash(HASH_PREFIX + password + HASH_SUFFIX))
 
-    # TODO: create function that round to the closest power of 2
+    @staticmethod
+    def round_to_lower_power_of_2(buffer_size):
+        return 1 << (buffer_size.bit_length() - 1)
+
+    @staticmethod
+    def wrap_data(data: bytes) -> bytes:
+        return MainServer.pad_data_size(len(data)) + data
+
+    @staticmethod
+    def pad_data_size(size: int) -> bytes:
+        return bytes('{0:0' + str(NUM_OF_DIGITS_IN_DATA_SIZE) + 'd}'.format(size))
