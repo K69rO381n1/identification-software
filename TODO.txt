@@ -1,0 +1,11 @@
+
+-   Convert the packet length to 4 bytes.
+
+-   Check out ImageIO
+
+-
+
+-   Add the pair (username : socket) to a dictionary,
+    so in the face recognition stage we will know to what username's image set we should compare
+
+-   When adding / Changing user's password, need to check its length < 100

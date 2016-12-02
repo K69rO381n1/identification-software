@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from threading import Thread
 import socket
-import DBUtil
+from DBUtil import DBUtil
 
 from PIL import Image
 from captcha.image import ImageCaptcha
@@ -11,6 +11,7 @@ from random import choice
 
 import PocketProtocol
 
+from os import listdir
 
 NUM_OF_CHARS_IN_CAPTCHA = 6
 CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
@@ -20,42 +21,55 @@ CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
                     'e', 'E', 'd', 'D', 'c', 'C', 'b', 'B', 'a', 'A',
                     '9', '8', '7', '6', '5', '4', '3', '2', '1', '0']
 
-PASSWORDS_TABLE_DDL = "CREATE TABLE passwords" \
+PASSWORDS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS passwords" \
                       "(" \
                       "    username VARCHAR(20) PRIMARY KEY NOT NULL," \
                       "    password BIGINT(20) NOT NULL," \
-                      "    CONSTRAINT passwords_1 FOREIGN KEY (username) REFERENCES users (username) ON DELETE CASCADE" \
+                      "    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username) " \
+                      "    ON DELETE CASCADE ON UPDATE CASCADE" \
                       ");"
 
-LOGIN_STATISTICS_TABLE_DDL = "CREATE TABLE login_statistics" \
+LOGIN_STATISTICS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS login_statistics" \
                              "(" \
                              "    stage TINYINT(4) NOT NULL," \
                              "    username VARCHAR(30) NOT NULL," \
                              "    number_of_failures INT(11) NOT NULL," \
                              "    date DATE NOT NULL," \
                              "    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage)," \
-                             "    CONSTRAINT login_statistics_1 FOREIGN KEY (username) REFERENCES users (username)" \
-                             " ON DELETE CASCADE ON UPDATE CASCADE" \
+                             "    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)" \
+                             "    ON DELETE CASCADE ON UPDATE CASCADE" \
                              ");"
 
-USERS_TABLE_DDL = "CREATE TABLE users" \
+USERS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS users" \
                   "(" \
                   "    first_name VARCHAR(20) NOT NULL," \
                   "    last_name VARCHAR(20) NOT NULL," \
                   "    username VARCHAR(30) NOT NULL," \
                   "    id BIGINT(20) PRIMARY KEY NOT NULL," \
-                  "    images LONGBLOB NOT NULL" \
-                  ");" \
-                  "CREATE UNIQUE INDEX username ON users (username);"
+                  "    CONSTRAINT UNIQUE INDEX (username)" \
+                  ");"
+
+USERS_IMAGES_DDL = "CREATE TABLE IF NOT EXISTS images" \
+                   "(" \
+                   "    username VARCHAR(30) NOT NULL," \
+                   "    images LONGBLOB NOT NULL," \
+                   "    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)" \
+                   "    ON DELETE CASCADE ON UPDATE CASCADE" \
+                   ");"
+
+GET_PASSWORD_QUERY = "SELECT password FROM passwords WHERE username = @0"
 
 BIND_IP = "0.0.0.0"
 BIND_PORT = 9999
 BACKLOG = 5
 
-USER = "root"
-PASSWORD = ""
-HOST = "127.0.0.1"
-DB_NAME = "identificationdb"
+DB_NAME = 'identificationdb'
+DB_CONFIG = {
+    'user': 'root',
+    'password': '',
+    'host': '127.0.0.1',
+    'database': DB_NAME,
+}
 
 HASH_PREFIX = "16d5f1gs48tg1"
 HASH_SUFFIX = "134gs2d4gsa"
@@ -65,14 +79,17 @@ IMAGE_COLORS = "RGBA"
 
 MAX_TRANSFER_AT_ONCE = 2048
 
+FONTS_DIR = "data/font/"
+VOICES_DIR = "data/voice/"
+FONTS = [FONTS_DIR+font for font in listdir(FONTS_DIR)]
+
 
 class MainServer(socket.socket):
-
     def __init__(self):
         super().__init__()
 
         # Getting a connection to the DB.
-        self.connection_to_db = DBUtil.get_connection(USER, PASSWORD, HOST, DB_NAME)
+        self.db = DBUtil(DB_CONFIG)
 
         # Creating the necessary tables. for more information see the DDLs above...
         self.create_tables()
@@ -80,17 +97,14 @@ class MainServer(socket.socket):
         # Creating a list of all clients.
         self.clients_socket_and_address = []
 
+        self.socket_to_username_dict = {}
+
         # Creating dictionary that maps from client to the latest captcha that has been send to him.
         self.last_captcha_text = {}
 
-        self.captcha_image_generator = ImageCaptcha(fonts=['data/font/DroidSansMono.ttf',
-                                                           'data/font/SEASRN__.ttf',
-                                                           'data/font/FFF_Tusj.ttf',
-                                                           'data/font/CaviarDreams.ttf',
-                                                           'data/font/Capture_it.ttf',
-                                                           'data/font/Amatic-Bold.ttf'])
+        self.captcha_image_generator = ImageCaptcha(fonts=FONTS)
 
-        self.captcha_audio_generator = AudioCaptcha(voicedir='data/voice')
+        self.captcha_audio_generator = AudioCaptcha(voicedir=VOICES_DIR)
 
         # Listening to the required IP and PORT.
         self.bind((BIND_IP, BIND_PORT))
@@ -116,7 +130,7 @@ class MainServer(socket.socket):
                 client_input = MainServer._recvfrom(client)
                 if client_input[0] == b'1':
                     pass
-                # TODO: Complete...
+                    # TODO: Complete...
         finally:
             client.close()
 
@@ -131,11 +145,10 @@ class MainServer(socket.socket):
             captcha2send += read
             read = bytes_io.read()
 
-        MainServer._sendto(client, captcha2send)
+        MainServer._sendto(client, captcha2send, 1)
 
-    def check_user_in_system(self, username, password):
+    def validate_password(self, username, password):
         pass
-
     def check_user_captcha_guess(self, client, guess_text):
         return self.last_captcha_text.get(client).get_text() == guess_text
 
@@ -154,8 +167,7 @@ class MainServer(socket.socket):
         TABLES['passwords'] = (
             PASSWORDS_TABLE_DDL
         )
-
-        DBUtil.create_tables(self.connection_to_db, TABLES, DB_NAME)
+        self.db.create_tables(TABLES, DB_NAME)
 
     # ************************************** Override methods ***********************************
 
@@ -179,11 +191,10 @@ class MainServer(socket.socket):
         packet = PocketProtocol.wrap_data(data, flag)
 
         while total_sent < len(packet):
-
             total_sent += client.send(
                 packet[total_sent: min(
-                                total_sent + MAX_TRANSFER_AT_ONCE,
-                                MainServer._round_to_lower_power_of_2(len(packet)))])
+                    total_sent + MAX_TRANSFER_AT_ONCE,
+                    MainServer._round_to_lower_power_of_2(len(packet)))])
 
     @staticmethod
     def _recvfrom(client: socket.socket) -> bytes:

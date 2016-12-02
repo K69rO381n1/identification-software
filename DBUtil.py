@@ -2,47 +2,55 @@ from mysql import connector
 from mysql.connector import errorcode
 
 
-def create_tables(connection_to_db, tables, db_name):
-    cursor = connection_to_db.data.cursor()
+class DBUtil:
 
-    try:
-        connection_to_db.database = db_name
+    def __init__(self, config):
+        self.config = config
+        # FIXME: May be removed.
+        self.connection_to_db = DBUtil._get_connection(**config)
+        self.cursor = self.connection_to_db.cursor()
 
-    except connector.Error as err:
-        if err.errno == errorcode.ER_BAD_DB_ERROR:
-            _create_database(cursor, db_name)
-            connection_to_db.database = db_name
-        else:
-            print(err)
-            exit(1)
+    def execute_query(self, query, *args):
+        self.cursor.execute(query, args)
 
-    for name, ddl in tables:
+    def create_tables(self, tables, db_name):
 
         try:
-            print("Creating table {}: ".format(name), end='')
-            cursor.execute(ddl)
+            self.connection_to_db.database = db_name
 
         except connector.Error as err:
-            if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
-                print("already exists.")
+            if err.errno == errorcode.ER_BAD_DB_ERROR:
+                self._create_database(db_name)
+                self.connection_to_db.database = db_name
             else:
-                print(err.msg)
-        else:
-            print("OK")
+                print(err)
+                exit(1)
 
-    cursor.close()
+        for name, ddl in tables:
+
+            try:
+                print("Creating table {}: ".format(name), end='')
+                self.execute_query(ddl)
+
+            except connector.Error as err:
+                if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
+                    print("already exists.")
+                else:
+                    print(err.msg)
+            else:
+                print("OK")
+
+        self.cursor.close()
+
+    def _create_database(self, db_name):
+        try:
+            self.cursor.execute(
+                "CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
+        except connector.Error as conn_err:
+            print("Failed creating database: {}".format(conn_err))
+
+    @staticmethod
+    def _get_connection(**config):
+        return connector.connection.MySQLConnection(config)
 
 
-def _create_database(cursor, db_name):
-    try:
-        cursor.execute(
-            "CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
-    except connector.Error as conn_err:
-        print("Failed creating database: {}".format(conn_err))
-        exit(1)
-
-
-def get_connection(user, password, host, db_name):
-    return connector.connection.MySQLConnection(user=user, password=password,
-                                                host=host,
-                                                database=db_name)
