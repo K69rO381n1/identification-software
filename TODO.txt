@@ -1,9 +1,6 @@
-
--   Convert the packet length to 4 bytes.
+-   Do face recognition module.
 
 -   Check out ImageIO
-
--
 
 -   Add the pair (username : socket) to a dictionary,
     so in the face recognition stage we will know to what username's image set we should compare

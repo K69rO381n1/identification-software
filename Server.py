@@ -13,7 +13,7 @@ import PocketProtocol
 
 from os import listdir
 
-NUM_OF_CHARS_IN_CAPTCHA = 6
+CAPTCHA_LENGTH = 6
 CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
                     'u', 'U', 't', 'T', 's', 'S', 'r', 'R', 'q', 'Q',
                     'p', 'P', 'o', 'O', 'n', 'N', 'm', 'M', 'l', 'L',
@@ -21,43 +21,60 @@ CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
                     'e', 'E', 'd', 'D', 'c', 'C', 'b', 'B', 'a', 'A',
                     '9', '8', '7', '6', '5', '4', '3', '2', '1', '0']
 
-PASSWORDS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS passwords" \
-                      "(" \
-                      "    username VARCHAR(20) PRIMARY KEY NOT NULL," \
-                      "    password BIGINT(20) NOT NULL," \
-                      "    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username) " \
-                      "    ON DELETE CASCADE ON UPDATE CASCADE" \
-                      ");"
+PASSWORDS_TABLE_DDL = \
+    "CREATE TABLE IF NOT EXISTS passwords" \
+    "(" \
+    "    username VARCHAR(20) PRIMARY KEY NOT NULL," \
+    "    password BIGINT(20) NOT NULL," \
+    "    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username) " \
+    "    ON DELETE CASCADE ON UPDATE CASCADE" \
+    ");"
 
-LOGIN_STATISTICS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS login_statistics" \
-                             "(" \
-                             "    stage TINYINT(4) NOT NULL," \
-                             "    username VARCHAR(30) NOT NULL," \
-                             "    number_of_failures INT(11) NOT NULL," \
-                             "    date DATE NOT NULL," \
-                             "    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage)," \
-                             "    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)" \
-                             "    ON DELETE CASCADE ON UPDATE CASCADE" \
-                             ");"
+LOGIN_STATISTICS_TABLE_DDL = \
+    "CREATE TABLE IF NOT EXISTS login_statistics" \
+    "(" \
+    "    stage TINYINT(4) NOT NULL," \
+    "    username VARCHAR(30) NOT NULL," \
+    "    number_of_failures INT(11) NOT NULL," \
+    "    date DATE NOT NULL," \
+    "    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage)," \
+    "    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)" \
+    "    ON DELETE CASCADE ON UPDATE CASCADE" \
+    ");"
 
-USERS_TABLE_DDL = "CREATE TABLE IF NOT EXISTS users" \
-                  "(" \
-                  "    first_name VARCHAR(20) NOT NULL," \
-                  "    last_name VARCHAR(20) NOT NULL," \
-                  "    username VARCHAR(30) NOT NULL," \
-                  "    id BIGINT(20) PRIMARY KEY NOT NULL," \
-                  "    CONSTRAINT UNIQUE INDEX (username)" \
-                  ");"
+USERS_TABLE_DDL = \
+    "CREATE TABLE IF NOT EXISTS users" \
+    "(" \
+    "    first_name VARCHAR(20) NOT NULL," \
+    "    last_name VARCHAR(20) NOT NULL," \
+    "    username VARCHAR(30) NOT NULL," \
+    "    id BIGINT(20) PRIMARY KEY NOT NULL," \
+    "    CONSTRAINT UNIQUE INDEX (username)" \
+    ");"
 
-USERS_IMAGES_DDL = "CREATE TABLE IF NOT EXISTS images" \
-                   "(" \
-                   "    username VARCHAR(30) NOT NULL," \
-                   "    images LONGBLOB NOT NULL," \
-                   "    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)" \
-                   "    ON DELETE CASCADE ON UPDATE CASCADE" \
-                   ");"
+USERS_IMAGES_DDL = \
+    "CREATE TABLE IF NOT EXISTS images" \
+    "(" \
+    "    username VARCHAR(30) NOT NULL," \
+    "    images LONGBLOB NOT NULL," \
+    "    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)" \
+    "    ON DELETE CASCADE ON UPDATE CASCADE" \
+    ");"
+
+MOST_RECENT_CAPTCHAS_TEXT_DDL = \
+    "CREATE TEMPORARY TABLE identificationdb.captchas_text" \
+    "(" \
+    "    ip VARCHAR(128) NOT NULL," \
+    "    port INT NOT NULL," \
+    "    captcha_text VARCHAR(10) NOT NULL," \
+    "    CONSTRAINT client_address PRIMARY KEY (ip, port)" \
+    ")"
+
+GET_CAPTCHA_TEXT = "SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1"
 
 GET_PASSWORD_QUERY = "SELECT password FROM passwords WHERE username = @0"
+
+UPDATE_PASSWORD_QUERY = "UPDATE passwords SET password=@0 WHERE username=@1"
 
 BIND_IP = "0.0.0.0"
 BIND_PORT = 9999
@@ -81,12 +98,12 @@ MAX_TRANSFER_AT_ONCE = 2048
 
 FONTS_DIR = "data/font/"
 VOICES_DIR = "data/voice/"
-FONTS = [FONTS_DIR+font for font in listdir(FONTS_DIR)]
+FONTS = [FONTS_DIR + font for font in listdir(FONTS_DIR)]
 
 
 class MainServer(socket.socket):
     def __init__(self):
-        super().__init__()
+        super(MainServer).__init__()
 
         # Getting a connection to the DB.
         self.db = DBUtil(DB_CONFIG)
@@ -94,8 +111,7 @@ class MainServer(socket.socket):
         # Creating the necessary tables. for more information see the DDLs above...
         self.create_tables()
 
-        # Creating a list of all clients.
-        self.clients_socket_and_address = []
+        self.socket_to_address_dict = {}
 
         self.socket_to_username_dict = {}
 
@@ -119,7 +135,7 @@ class MainServer(socket.socket):
         try:
             while not self.s.close():
                 client_socket, client_address = self.accept()
-                self.clients_socket_and_address.append((client_socket, client_address))
+                self.socket_to_address_dict[client_socket] = client_address
         except OSError:
             pass
 
@@ -128,9 +144,45 @@ class MainServer(socket.socket):
         try:
             while True:
                 client_input = MainServer._recvfrom(client)
-                if client_input[0] == b'1':
-                    pass
+                flag = client_input[0]
+                data = client_input[1:]
+                if flag == PocketProtocol.CAPTCHA_REQUEST:
+                    MainServer._sendto(client,
+                                       self.captcha_image_generator.generate(
+                                           MainServer._space_text(
+                                               MainServer._random_text(CAPTCHA_LENGTH))),
+                                       PocketProtocol.CAPTCHA_RESPONSE)
+
+                elif flag == PocketProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
+                    MainServer._sendto(client,
+                                       PocketProtocol.to_bytes(self.check_user_captcha_guess(
+                                           *PocketProtocol.parse_str(data, 1)), 1),
+                                       PocketProtocol.CAPTCHA_TEXT_CHECK_RESPONSE)
+
+                elif flag == PocketProtocol.CREDENTIALS_CHECK_REQUEST:
+                    MainServer._sendto(client,
+                                       PocketProtocol.to_bytes(self.validate_password(
+                                           *PocketProtocol.parse_str(data, 2)), 1),
+                                       PocketProtocol.CREDENTIALS_CHECK_RESPONSE)
+
+                elif flag == PocketProtocol.FACE_IMAGE_CHECK_REQUEST:
                     # TODO: Complete...
+                    pass
+
+                elif flag == PocketProtocol.STATISTICS_DATA_REQUEST:
+                    # TODO: Complete...
+                    pass
+
+                elif flag == PocketProtocol.CHANGE_PASSWORD_REQUEST:
+                    username, old_password, new_password = PocketProtocol.parse_str(data, 3)
+                    if self.validate_password(username, old_password):
+                        self.db.execute_query(UPDATE_PASSWORD_QUERY, new_password, username)
+                        MainServer._sendto(client, PocketProtocol.to_bytes(True, 1),
+                                           PocketProtocol.CHANGE_PASSWORD_RESPONSE)
+                    else:
+                        MainServer._sendto(client, PocketProtocol.to_bytes(False, 1),
+                                           PocketProtocol.CHANGE_PASSWORD_RESPONSE)
+
         finally:
             client.close()
 
@@ -147,10 +199,13 @@ class MainServer(socket.socket):
 
         MainServer._sendto(client, captcha2send, 1)
 
-    def validate_password(self, username, password):
-        pass
-    def check_user_captcha_guess(self, client, guess_text):
-        return self.last_captcha_text.get(client).get_text() == guess_text
+    def validate_password(self, username: str, password: str) -> bool:
+        password_from_db = next(self.db.execute_query(GET_PASSWORD_QUERY, username))
+        return password_from_db == password
+
+    def check_user_captcha_guess(self, client: socket.socket, guess_text: str):
+        captcha_text = self.db.execute_query(GET_CAPTCHA_TEXT, *self.socket_to_address_dict[client])
+        return captcha_text == guess_text
 
     def create_tables(self):
 
@@ -167,6 +222,11 @@ class MainServer(socket.socket):
         TABLES['passwords'] = (
             PASSWORDS_TABLE_DDL
         )
+
+        TABLES['captchas_text'] = (
+            MOST_RECENT_CAPTCHAS_TEXT_DDL
+        )
+
         self.db.create_tables(TABLES, DB_NAME)
 
     # ************************************** Override methods ***********************************
@@ -178,7 +238,7 @@ class MainServer(socket.socket):
     # ************************************** Static functions ***********************************
 
     @staticmethod
-    def _sendto(client: socket.socket, data, flag):
+    def _sendto(client: socket.socket, data: bytes, flag: int):
         """
         This method sends to the client the data Using the protocol defined in file PocketProtocol.
         NOTE: Any data sending to clients should be though this method!
@@ -206,7 +266,7 @@ class MainServer(socket.socket):
         """
 
         data = b''
-        size = client.recvfrom(PocketProtocol.NUM_OF_DIGITS_IN_DATA_SIZE) + PocketProtocol.NUM_OF_DIGITS_IN_MESSAGE_TYPE
+        size = client.recvfrom(PocketProtocol.NUM_OF_BYTES_IN_DATA_SIZE) + PocketProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
 
         while len(data) < size:
             data += client.recv(
@@ -216,11 +276,12 @@ class MainServer(socket.socket):
         return data
 
     @staticmethod
-    def random_text(size):
+    def _random_text(size):
         return "".join([choice(CAPTCHA_ALPHABET) for _ in range(size)])
 
     @staticmethod
-    def bytes2images(image_as_bytes):
+    @DeprecationWarning
+    def bytes2images(image_as_bytes: bytes):
         height = image_as_bytes[0]
         width = image_as_bytes[1]
         image = Image.new(IMAGE_MODE, (height, width), IMAGE_COLORS)
@@ -232,9 +293,13 @@ class MainServer(socket.socket):
         return image
 
     @staticmethod
-    def encrypt(password):
+    def encrypt(password: str):
         return hash(hash(HASH_PREFIX + password + HASH_SUFFIX))
 
     @staticmethod
-    def _round_to_lower_power_of_2(buffer_size):
+    def _round_to_lower_power_of_2(buffer_size: int):
         return 1 << (buffer_size.bit_length() - 1)
+
+    @staticmethod
+    def _space_text(text: str):
+        " ".join(text)

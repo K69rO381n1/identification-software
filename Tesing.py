@@ -1,16 +1,17 @@
 # from captcha.audio import AudioCaptcha
 from captcha.image import ImageCaptcha
+from os import listdir
+
+FONTS_DIR = "data/font/"
+VOICES_DIR = "data/voice/"
+FONTS = [FONTS_DIR+font for font in listdir(FONTS_DIR)]
 
 # audio = AudioCaptcha(voicedir='data/voice')
-image = ImageCaptcha(fonts=['data/font/DroidSansMono.ttf',
-                            'data/font/SEASRN__.ttf',
-                            'data/font/FFF_Tusj.ttf',
-                            'data/font/CaviarDreams.ttf',
-                            'data/font/Capture_it.ttf',
-                            'data/font/Amatic-Bold.ttf'])
+image = ImageCaptcha(fonts=FONTS)
 
 # data = audio.generate('111')
 # audio.write('111', 'out.mp3')
 
-data = image.generate('Hallo world')
-image.write('Hallo world', 'out.bmp', format='bmp')
+data = image.generate('H a l l o   w o r l d')
+print(data.read())
+image.write('H a l l o   w o r l d', 'out.png', format='png')

@@ -1,0 +1,54 @@
+CREATE TABLE IF NOT EXISTS passwords
+(
+    username VARCHAR(20) PRIMARY KEY NOT NULL,
+    password BIGINT(20) NOT NULL,
+    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS login_statistics
+(
+    stage TINYINT(4) NOT NULL,
+    username VARCHAR(30) NOT NULL,
+    number_of_failures INT(11) NOT NULL,
+    date DATE NOT NULL,
+    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage),
+    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+
+CREATE TABLE IF NOT EXISTS users
+(
+    first_name VARCHAR(20) NOT NULL,
+    last_name VARCHAR(20) NOT NULL,
+    username VARCHAR(30) NOT NULL,
+    id BIGINT(20) PRIMARY KEY NOT NULL,
+    CONSTRAINT UNIQUE INDEX (username)
+);
+
+
+CREATE TABLE IF NOT EXISTS images
+(
+    username VARCHAR(30) NOT NULL,
+    images LONGBLOB NOT NULL,
+    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+
+CREATE TEMPORARY TABLE identificationdb.captchas_text
+(
+    ip VARCHAR(128) NOT NULL,
+    port INT NOT NULL,
+    captcha_text VARCHAR(10) NOT NULL,
+    CONSTRAINT client_address PRIMARY KEY (ip, port)
+)
+
+
+SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1
+
+
+SELECT password FROM passwords WHERE username = @0
+
+UPDATE passwords SET password=@0 WHERE username=@1
