@@ -26,11 +26,10 @@ class DBUtil:
                 print(err)
                 exit(1)
 
-        for name, ddl in tables:
-
+        for name in tables:
             try:
                 print("Creating table {}: ".format(name), end='')
-                self.execute_query(ddl)
+                self.execute_query(tables[name])
 
             except connector.Error as err:
                 if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
@@ -50,8 +49,8 @@ class DBUtil:
             print("Failed creating database: {}".format(conn_err))
 
     @staticmethod
-    def _get_connection(**config):
-        return connector.connection.MySQLConnection(config)
+    def _get_connection(config):
+        return connector.connect(**config)
 
     def close(self):
         self.cursor.close()

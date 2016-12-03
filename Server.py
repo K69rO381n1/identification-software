@@ -5,11 +5,10 @@ from os import listdir
 from random import choice
 from threading import Thread
 
-from PIL import Image
 from captcha.audio import AudioCaptcha
 from captcha.image import ImageCaptcha
 
-import PocketProtocol
+import TransmissionProtocol
 from DBUtil import DBUtil
 
 CAPTCHA_LENGTH = 6
@@ -55,8 +54,8 @@ USERS_IMAGES_DDL = \
     "CREATE TABLE IF NOT EXISTS images" \
     "(" \
     "    username VARCHAR(30) NOT NULL," \
-    "    images LONGBLOB NOT NULL," \
-    "    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)" \
+    "    image LONGBLOB NOT NULL," \
+    "    CONSTRAINT image FOREIGN KEY (username) REFERENCES users (username)" \
     "    ON DELETE CASCADE ON UPDATE CASCADE" \
     ");"
 
@@ -69,13 +68,22 @@ MOST_RECENT_CAPTCHAS_TEXT_DDL = \
     "    CONSTRAINT client_address PRIMARY KEY (ip, port)" \
     ")"
 
-GET_CAPTCHA_TEXT = "SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1"
+GET_CAPTCHA_TEXT = \
+    "SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1"
 
-GET_PASSWORD_QUERY = "SELECT password FROM passwords WHERE username = @0"
+GET_PASSWORD_QUERY = \
+    "SELECT password FROM passwords WHERE username = @0"
 
-UPDATE_PASSWORD_QUERY = "UPDATE passwords SET password=@0 WHERE username=@1"
+UPDATE_PASSWORD_QUERY = \
+    "UPDATE passwords SET password=@0 WHERE username=@1"
 
-BIND_IP = "0.0.0.0"
+GET_ALL_IMAGES_QUERY = \
+    "SELECT image FROM images WHERE username=@0"
+
+GET_ALL_STATISTICS_DATA_QUERY = \
+    "SELECT * FROM login_statistics"
+
+BIND_IP = 'localhost'
 BIND_PORT = 9999
 BACKLOG = 5
 
@@ -102,7 +110,7 @@ FONTS = [FONTS_DIR + font for font in listdir(FONTS_DIR)]
 
 class MainServer(socket.socket):
     def __init__(self):
-        super(MainServer).__init__()
+        super(MainServer, self).__init__(socket.AF_INET, socket.SOCK_STREAM)
 
         # Getting a connection to the DB.
         self.db = DBUtil(DB_CONFIG)
@@ -132,7 +140,7 @@ class MainServer(socket.socket):
 
     def accept_clients(self):
         try:
-            while not self.s.close():
+            while not self._closed:
                 client_socket, client_address = self.accept()
                 self.socket_to_address_dict[client_socket] = client_address
         except OSError:
@@ -145,40 +153,40 @@ class MainServer(socket.socket):
                 client_input = MainServer._recvfrom(client)
                 flag = client_input[0]
                 data = client_input[1:]
-                if flag == PocketProtocol.CAPTCHA_REQUEST:
+                if flag == TransmissionProtocol.CAPTCHA_REQUEST:
                     MainServer._sendto(client,
                                        self.generate_captcha(),
-                                       PocketProtocol.CAPTCHA_RESPONSE)
+                                       TransmissionProtocol.CAPTCHA_RESPONSE)
 
-                elif flag == PocketProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
+                elif flag == TransmissionProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
                     MainServer._sendto(client,
-                                       PocketProtocol.to_bytes(self.check_user_captcha_guess(
-                                           *PocketProtocol.parse_str(data, 1)), 1),
-                                       PocketProtocol.CAPTCHA_TEXT_CHECK_RESPONSE)
+                                       TransmissionProtocol.to_bytes(self.check_user_captcha_guess(
+                                           *TransmissionProtocol.parse_str(data, 1)), 1),
+                                       TransmissionProtocol.CAPTCHA_TEXT_CHECK_RESPONSE)
 
-                elif flag == PocketProtocol.CREDENTIALS_CHECK_REQUEST:
+                elif flag == TransmissionProtocol.CREDENTIALS_CHECK_REQUEST:
                     MainServer._sendto(client,
-                                       PocketProtocol.to_bytes(self.validate_password(
-                                           *PocketProtocol.parse_str(data, 2)), 1),
-                                       PocketProtocol.CREDENTIALS_CHECK_RESPONSE)
+                                       TransmissionProtocol.to_bytes(self.validate_password(
+                                           *TransmissionProtocol.parse_str(data, 2)), 1),
+                                       TransmissionProtocol.CREDENTIALS_CHECK_RESPONSE)
 
-                elif flag == PocketProtocol.FACE_IMAGE_CHECK_REQUEST:
+                elif flag == TransmissionProtocol.FACE_IMAGE_CHECK_REQUEST:
                     # TODO: Complete...
                     pass
 
-                elif flag == PocketProtocol.STATISTICS_DATA_REQUEST:
+                elif flag == TransmissionProtocol.STATISTICS_DATA_REQUEST:
                     # TODO: Complete...
                     pass
 
-                elif flag == PocketProtocol.CHANGE_PASSWORD_REQUEST:
-                    username, old_password, new_password = PocketProtocol.parse_str(data, 3)
+                elif flag == TransmissionProtocol.CHANGE_PASSWORD_REQUEST:
+                    username, old_password, new_password = TransmissionProtocol.parse_str(data, 3)
                     if self.validate_password(username, old_password):
                         self.db.execute_query(UPDATE_PASSWORD_QUERY, new_password, username)
-                        MainServer._sendto(client, PocketProtocol.to_bytes(True, 1),
-                                           PocketProtocol.CHANGE_PASSWORD_RESPONSE)
+                        MainServer._sendto(client, TransmissionProtocol.to_bytes(True, 1),
+                                           TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
                     else:
-                        MainServer._sendto(client, PocketProtocol.to_bytes(False, 1),
-                                           PocketProtocol.CHANGE_PASSWORD_RESPONSE)
+                        MainServer._sendto(client, TransmissionProtocol.to_bytes(False, 1),
+                                           TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
 
         finally:
             client.close()
@@ -238,7 +246,7 @@ class MainServer(socket.socket):
         """
 
         total_sent = 0
-        packet = PocketProtocol.wrap_data(data, flag)
+        packet = TransmissionProtocol.wrap_data(data, flag)
 
         while total_sent < len(packet):
             total_sent += client.send(
@@ -256,7 +264,8 @@ class MainServer(socket.socket):
         """
 
         data = b''
-        size = client.recvfrom(PocketProtocol.NUM_OF_BYTES_IN_DATA_SIZE) + PocketProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
+        size = client.recvfrom(
+            TransmissionProtocol.NUM_OF_BYTES_IN_DATA_SIZE) + TransmissionProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
 
         while len(data) < size:
             data += client.recv(
@@ -266,21 +275,8 @@ class MainServer(socket.socket):
         return data
 
     @staticmethod
-    def _random_text(size):
+    def _random_text(size: int) -> str:
         return "".join([choice(CAPTCHA_ALPHABET) for _ in range(size)])
-
-    @staticmethod
-    @DeprecationWarning
-    def bytes2images(image_as_bytes: bytes):
-        height = image_as_bytes[0]
-        width = image_as_bytes[1]
-        image = Image.new(IMAGE_MODE, (height, width), IMAGE_COLORS)
-
-        for i in range(height):
-            for j in range(width):
-                image.putpixel((i, j), image_as_bytes[i * width + j + 2])
-
-        return image
 
     @staticmethod
     def encrypt(password: str):

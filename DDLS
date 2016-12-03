@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS users
 CREATE TABLE IF NOT EXISTS images
 (
     username VARCHAR(30) NOT NULL,
-    images LONGBLOB NOT NULL,
-    CONSTRAINT images FOREIGN KEY (username) REFERENCES users (username)
+    image LONGBLOB NOT NULL,
+    CONSTRAINT image FOREIGN KEY (username) REFERENCES users (username)
     ON DELETE CASCADE ON UPDATE CASCADE
 );
 
