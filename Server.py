@@ -1,17 +1,16 @@
 from __future__ import print_function
 
-from threading import Thread
 import socket
-from DBUtil import DBUtil
+from os import listdir
+from random import choice
+from threading import Thread
 
 from PIL import Image
-from captcha.image import ImageCaptcha
 from captcha.audio import AudioCaptcha
-from random import choice
+from captcha.image import ImageCaptcha
 
 import PocketProtocol
-
-from os import listdir
+from DBUtil import DBUtil
 
 CAPTCHA_LENGTH = 6
 CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
@@ -148,9 +147,7 @@ class MainServer(socket.socket):
                 data = client_input[1:]
                 if flag == PocketProtocol.CAPTCHA_REQUEST:
                     MainServer._sendto(client,
-                                       self.captcha_image_generator.generate(
-                                           MainServer._space_text(
-                                               MainServer._random_text(CAPTCHA_LENGTH))),
+                                       self.generate_captcha(),
                                        PocketProtocol.CAPTCHA_RESPONSE)
 
                 elif flag == PocketProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
@@ -186,18 +183,11 @@ class MainServer(socket.socket):
         finally:
             client.close()
 
-    def send_captcha(self, client: socket):
+    def generate_captcha(self):
 
-        bytes_io = self.captcha_image_generator.generate('', format='png')
-
-        captcha2send = b''
-
-        read = bytes_io.read()
-        while read != -1:
-            captcha2send += read
-            read = bytes_io.read()
-
-        MainServer._sendto(client, captcha2send, 1)
+        return self.captcha_image_generator.generate(
+            MainServer._space_text(MainServer._random_text(CAPTCHA_LENGTH)),
+            format='png').read()
 
     def validate_password(self, username: str, password: str) -> bool:
         password_from_db = next(self.db.execute_query(GET_PASSWORD_QUERY, username))
@@ -233,7 +223,7 @@ class MainServer(socket.socket):
 
     def close(self):
         super(socket.socket, self).close()
-        self.connection_to_db.close()
+        self.db.close()
 
     # ************************************** Static functions ***********************************
 
@@ -302,4 +292,8 @@ class MainServer(socket.socket):
 
     @staticmethod
     def _space_text(text: str):
-        " ".join(text)
+        return " ".join(text)
+
+
+if __name__ == '__main__':
+    a = MainServer()

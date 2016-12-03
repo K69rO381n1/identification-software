@@ -53,4 +53,6 @@ class DBUtil:
     def _get_connection(**config):
         return connector.connection.MySQLConnection(config)
 
-
+    def close(self):
+        self.cursor.close()
+        self.connection_to_db.close()
