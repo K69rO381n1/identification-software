@@ -1,10 +1,10 @@
 """
 Send / Receive protocol:
     Every data will be transferred in its *full form,
-    wrapped with header that contains 3 bytes for that data length and 1 byte for the msg purpose.
-    [length (3 bytes) : Flag (1 byte) : data]
+    wrapped with header that contains 4 bytes for that data length and 1 byte for the msg purpose.
+    [length (4 bytes) : Flag (1 byte) : data]
 
-    Length: integer from 0 to 256^3 (more that 16 MB...)
+    Length: integer from 0 to 256^3 (more that 16 Gb...)
     Flag: One of the following values,
 
         From client:
@@ -62,18 +62,10 @@ Send / Receive protocol:
                                     b'\x01' if the old username & password were correct and the image added.
 """
 
-NUM_OF_BYTES_IN_DATA_SIZE = 3
+NUM_OF_BYTES_IN_DATA_SIZE = 4
 NUM_OF_BYTES_IN_MESSAGE_TYPE = 1
 
 BYTE_ORDER = 'big'
-
-CAPTCHA_RESPONSE            = CAPTCHA_REQUEST               = b'0'
-CAPTCHA_TEXT_CHECK_RESPONSE = CAPTCHA_TEXT_CHECK_REQUEST    = b'1'
-CREDENTIALS_CHECK_RESPONSE  = CREDENTIALS_CHECK_REQUEST     = b'2'
-FACE_IMAGE_CHECK_RESPONSE   = FACE_IMAGE_CHECK_REQUEST      = b'3'
-STATISTICS_DATA_RESPONSE    = STATISTICS_DATA_REQUEST       = b'4'
-CHANGE_PASSWORD_RESPONSE    = CHANGE_PASSWORD_REQUEST       = b'5'
-ADD_IMAGE_RESPONSE          = ADD_IMAGE_REQUEST             = b'6'
 
 
 def wrap_data(data: bytes, flag: int) -> bytes:
@@ -91,17 +83,27 @@ def to_bytes(value, length) -> bytes:
 def parse_str(data: bytes, num_of_argument_expected: int) -> tuple:
     i = 0
     strings = []
-    while i < len(data):
+    while i < len(data) and len(strings) < num_of_argument_expected:
         str_len = int.from_bytes(data[i], 'big')
         strings.append(
             _bytes_to_str(data[i+1: i+1+str_len]))
         i += 1+str_len
 
-    assert len(strings) == num_of_argument_expected, \
-        Exception('The data does not match to the number of arguments expected!')
+    # If there is eny excess data we append it too (as bytes!)
+    if i < len(data):
+        strings.append(data[i:])
 
     return tuple(strings)
 
 
 def _bytes_to_str(bytes_value: bytes) -> str:
     return str(bytes_value)[2:-1]
+
+
+CAPTCHA_RESPONSE = CAPTCHA_REQUEST = 0
+CAPTCHA_TEXT_CHECK_RESPONSE = CAPTCHA_TEXT_CHECK_REQUEST = 1
+CREDENTIALS_CHECK_RESPONSE = CREDENTIALS_CHECK_REQUEST = 2
+FACE_IMAGE_CHECK_RESPONSE = FACE_IMAGE_CHECK_REQUEST = 3
+STATISTICS_DATA_RESPONSE = STATISTICS_DATA_REQUEST = 4
+CHANGE_PASSWORD_RESPONSE = CHANGE_PASSWORD_REQUEST = 5
+ADD_IMAGE_RESPONSE = ADD_IMAGE_REQUEST = 6

@@ -68,14 +68,17 @@ MOST_RECENT_CAPTCHAS_TEXT_DDL = \
     "    CONSTRAINT client_address PRIMARY KEY (ip, port)" \
     ")"
 
+INSERT_IMAGE_QUERY = \
+    "INSERT INTO images (username, image) VALUES (@0, @1)"
+
+UPDATE_PASSWORD_QUERY = \
+    "UPDATE passwords SET password=@0 WHERE username=@1"
+
 GET_CAPTCHA_TEXT = \
     "SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1"
 
 GET_PASSWORD_QUERY = \
     "SELECT password FROM passwords WHERE username = @0"
-
-UPDATE_PASSWORD_QUERY = \
-    "UPDATE passwords SET password=@0 WHERE username=@1"
 
 GET_ALL_IMAGES_QUERY = \
     "SELECT image FROM images WHERE username=@0"
@@ -142,21 +145,27 @@ class MainServer(socket.socket):
         try:
             while not self._closed:
                 client_socket, client_address = self.accept()
+                print('Accept client: {}'.format(client_address))
                 self.socket_to_address_dict[client_socket] = client_address
+                Thread(target=self.handle_client, args=(client_socket,)).start()
         except OSError:
             pass
 
     def handle_client(self, client: socket.socket):
-
+        print('Start handling {}'.format(client.getsockname()))
         try:
             while True:
                 client_input = MainServer._recvfrom(client)
+                print('Receive input: {}'.format(client_input))
                 flag = client_input[0]
                 data = client_input[1:]
+                print('flag {} & data {}'.format(flag, data))
                 if flag == TransmissionProtocol.CAPTCHA_REQUEST:
+                    print('sending captcha')
                     MainServer._sendto(client,
                                        self.generate_captcha(),
                                        TransmissionProtocol.CAPTCHA_RESPONSE)
+                    print('finish')
 
                 elif flag == TransmissionProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
                     MainServer._sendto(client,
@@ -180,6 +189,7 @@ class MainServer(socket.socket):
 
                 elif flag == TransmissionProtocol.CHANGE_PASSWORD_REQUEST:
                     username, old_password, new_password = TransmissionProtocol.parse_str(data, 3)
+
                     if self.validate_password(username, old_password):
                         self.db.execute_query(UPDATE_PASSWORD_QUERY, new_password, username)
                         MainServer._sendto(client, TransmissionProtocol.to_bytes(True, 1),
@@ -187,6 +197,17 @@ class MainServer(socket.socket):
                     else:
                         MainServer._sendto(client, TransmissionProtocol.to_bytes(False, 1),
                                            TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
+
+                elif flag == TransmissionProtocol.ADD_IMAGE_REQUEST:
+                    username, password, image = TransmissionProtocol.parse_str(data, 2)
+
+                    if self.validate_password(username, password):
+                        self.db.execute_query(INSERT_IMAGE_QUERY, username, image)
+                        MainServer._sendto(client, TransmissionProtocol.to_bytes(True, 1),
+                                           TransmissionProtocol.ADD_IMAGE_RESPONSE)
+                    else:
+                        MainServer._sendto(client, TransmissionProtocol.to_bytes(False, 1),
+                                           TransmissionProtocol.ADD_IMAGE_RESPONSE)
 
         finally:
             client.close()
@@ -251,8 +272,7 @@ class MainServer(socket.socket):
         while total_sent < len(packet):
             total_sent += client.send(
                 packet[total_sent: min(
-                    total_sent + MAX_TRANSFER_AT_ONCE,
-                    MainServer._round_to_lower_power_of_2(len(packet)))])
+                    total_sent + MAX_TRANSFER_AT_ONCE, len(packet))])
 
     @staticmethod
     def _recvfrom(client: socket.socket) -> bytes:
@@ -264,9 +284,8 @@ class MainServer(socket.socket):
         """
 
         data = b''
-        size = client.recvfrom(
-            TransmissionProtocol.NUM_OF_BYTES_IN_DATA_SIZE) + TransmissionProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
-
+        size = int.from_bytes(client.recv(
+            TransmissionProtocol.NUM_OF_BYTES_IN_DATA_SIZE), 'big') + TransmissionProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
         while len(data) < size:
             data += client.recv(
                 min(

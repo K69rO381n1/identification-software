@@ -7,7 +7,7 @@ class DBUtil:
     def __init__(self, config):
         self.config = config
         # FIXME: May be removed.
-        self.connection_to_db = DBUtil._get_connection(**config)
+        self.connection_to_db = DBUtil._get_connection(config)
         self.cursor = self.connection_to_db.cursor()
 
     def execute_query(self, query, *args):
