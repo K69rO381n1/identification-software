@@ -23,7 +23,7 @@ PASSWORDS_TABLE_DDL = \
     "CREATE TABLE IF NOT EXISTS passwords" \
     "(" \
     "    username VARCHAR(20) PRIMARY KEY NOT NULL," \
-    "    password BIGINT(20) NOT NULL," \
+    "    password BIGINT(20)              NOT NULL," \
     "    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username) " \
     "    ON DELETE CASCADE ON UPDATE CASCADE" \
     ");"
@@ -31,10 +31,10 @@ PASSWORDS_TABLE_DDL = \
 LOGIN_STATISTICS_TABLE_DDL = \
     "CREATE TABLE IF NOT EXISTS login_statistics" \
     "(" \
-    "    stage TINYINT(4) NOT NULL," \
-    "    username VARCHAR(30) NOT NULL," \
-    "    number_of_failures INT(11) NOT NULL," \
-    "    date DATE NOT NULL," \
+    "    stage               TINYINT(4)  NOT NULL," \
+    "    username            VARCHAR(30) NOT NULL," \
+    "    number_of_failures  INT(11)     NOT NULL," \
+    "    date                DATE        NOT NULL," \
     "    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage)," \
     "    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)" \
     "    ON DELETE CASCADE ON UPDATE CASCADE" \
@@ -43,28 +43,27 @@ LOGIN_STATISTICS_TABLE_DDL = \
 USERS_TABLE_DDL = \
     "CREATE TABLE IF NOT EXISTS users" \
     "(" \
-    "    first_name VARCHAR(20) NOT NULL," \
-    "    last_name VARCHAR(20) NOT NULL," \
-    "    username VARCHAR(30) NOT NULL," \
-    "    id BIGINT(20) PRIMARY KEY NOT NULL," \
-    "    CONSTRAINT UNIQUE INDEX (username)" \
+    "    first_name VARCHAR(20)             NOT NULL," \
+    "    last_name  VARCHAR(20)             NOT NULL," \
+    "    username   VARCHAR(30)             NOT NULL UNIQUE ," \
+    "    id         BIGINT(20)  PRIMARY KEY NOT NULL" \
     ");"
 
 USERS_IMAGES_DDL = \
     "CREATE TABLE IF NOT EXISTS images" \
     "(" \
-    "    username VARCHAR(30) NOT NULL," \
-    "    image LONGBLOB NOT NULL," \
+    "    username  VARCHAR(30) NOT NULL," \
+    "    image     LONGBLOB    NOT NULL," \
     "    CONSTRAINT image FOREIGN KEY (username) REFERENCES users (username)" \
     "    ON DELETE CASCADE ON UPDATE CASCADE" \
     ");"
 
 MOST_RECENT_CAPTCHAS_TEXT_DDL = \
-    "CREATE TEMPORARY TABLE identificationdb.captchas_text" \
+    "CREATE TEMPORARY TABLE captchas_text" \
     "(" \
-    "    ip VARCHAR(128) NOT NULL," \
-    "    port INT NOT NULL," \
-    "    captcha_text VARCHAR(10) NOT NULL," \
+    "    ip           VARCHAR(128) NOT NULL," \
+    "    port         INT          NOT NULL," \
+    "    captcha_text VARCHAR(10)  NOT NULL," \
     "    CONSTRAINT client_address PRIMARY KEY (ip, port)" \
     ")"
 
@@ -90,7 +89,7 @@ BIND_IP = 'localhost'
 BIND_PORT = 9999
 BACKLOG = 5
 
-DB_NAME = 'identificationdb'
+DB_NAME = 'identification.db'
 DB_CONFIG = {
     'user': 'root',
     'password': '',
@@ -246,7 +245,7 @@ class MainServer(socket.socket):
             MOST_RECENT_CAPTCHAS_TEXT_DDL
         )
 
-        self.db.create_tables(TABLES, DB_NAME)
+        self.db.create_tables(TABLES)
 
     # ************************************** Override methods ***********************************
 

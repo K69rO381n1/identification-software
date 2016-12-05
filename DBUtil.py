@@ -1,5 +1,4 @@
-from mysql import connector
-from mysql.connector import errorcode
+import sqlite3
 
 
 class DBUtil:
@@ -12,45 +11,21 @@ class DBUtil:
 
     def execute_query(self, query, *args):
         self.cursor.execute(query, args)
+        self.connection_to_db.commit()
 
-    def create_tables(self, tables, db_name):
-
-        try:
-            self.connection_to_db.database = db_name
-
-        except connector.Error as err:
-            if err.errno == errorcode.ER_BAD_DB_ERROR:
-                self._create_database(db_name)
-                self.connection_to_db.database = db_name
-            else:
-                print(err)
-                exit(1)
+    def create_tables(self, tables):
 
         for name in tables:
-            try:
-                print("Creating table {}: ".format(name), end='')
-                self.execute_query(tables[name])
-
-            except connector.Error as err:
-                if err.errno == errorcode.ER_TABLE_EXISTS_ERROR:
-                    print("already exists.")
-                else:
-                    print(err.msg)
-            else:
-                print("OK")
-
-        self.cursor.close()
+            print("Creating table {} ".format(name))
+            self.execute_query(tables[name])
 
     def _create_database(self, db_name):
-        try:
-            self.cursor.execute(
+        self.cursor.execute(
                 "CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
-        except connector.Error as conn_err:
-            print("Failed creating database: {}".format(conn_err))
 
     @staticmethod
     def _get_connection(config):
-        return connector.connect(**config)
+        return sqlite3.connect(config['database'])
 
     def close(self):
         self.cursor.close()

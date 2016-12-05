@@ -1,3 +1,7 @@
+
+
+************************************ MySQL syntax ************************************
+
 CREATE TABLE IF NOT EXISTS passwords
 (
     username VARCHAR(20) PRIMARY KEY NOT NULL,
@@ -44,6 +48,62 @@ CREATE TEMPORARY TABLE identificationdb.captchas_text
     captcha_text VARCHAR(10) NOT NULL,
     CONSTRAINT client_address PRIMARY KEY (ip, port)
 )
+
+
+
+
+************************************ SQLite syntax ************************************
+
+CREATE TABLE captchas_text
+(
+    ip TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    captcha_text TEXT NOT NULL,
+    CONSTRAINT captchas_text_ip_port_pk PRIMARY KEY (ip, port)
+);
+
+
+CREATE TABLE images
+(
+    username TEXT NOT NULL,
+    image TEXT NOT NULL,
+    FOREIGN KEY (username) REFERENCES users (username) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED
+);
+
+
+CREATE TABLE login_statistics
+(
+    stage INTEGER NOT NULL,
+    username TEXT NOT NULL,
+    number_of_failures INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    CONSTRAINT login_statistics_stage_username_pk PRIMARY KEY (stage, username),
+    FOREIGN KEY (username) REFERENCES users (username) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED
+);
+
+
+CREATE TABLE passwords
+(
+    username TEXT PRIMARY KEY NOT NULL,
+    password INTEGER NOT NULL,
+    FOREIGN KEY (username) REFERENCES users (username) ON DELETE CASCADE ON UPDATE CASCADE DEFERRABLE INITIALLY DEFERRED
+);
+
+
+CREATE TABLE users
+(
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    id INTEGER PRIMARY KEY NOT NULL
+);
+
+
+
+
+************************************ Queries ************************************
+
+CREATE UNIQUE INDEX users_username_uindex ON users (username);
 
 
 SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1
