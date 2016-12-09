@@ -29,10 +29,20 @@ Send / Receive protocol:
                                     old password length (1 byte) : old password.... :
                                     new password length (1 byte) : new password...]
 
-            b'5'    Request for adding new facial image.
+            b'6'    Request for adding new facial image.
                     Data expected: [username length (1 byte) : username... :
                                     old password length (1 byte) : old password.... :
                                     Full png Image file (As-Is, including any header / footer)]
+
+            b'7'    Request for adding new user. This request must made by an admin or it will fail.
+                    Data expected: [
+                                    admin username length   (1 byte)  : admin username...   :
+                                    admin password length   (1 byte)  : admin password...   :
+                                    first name length (1 byte)  : first name... :
+                                    last name length  (1 byte)  : last name...  :
+                                    username length   (1 byte)  : username...   :
+                                    password length   (1 byte)  : password...   :
+                                    id (4 byte) : permission (1 byte)]
 
         From server:
 
@@ -60,6 +70,11 @@ Send / Receive protocol:
                     Data expected: Boolean value (1 byte:
                                     b'\x00' if the old username & password didn't match,
                                     b'\x01' if the old username & password were correct and the image added.
+
+            b'7'    Adding new user success response.
+                    Data expected: Boolean value (1 byte:
+                                    b'\x00' if the admin username & password weren't correct,
+                                    b'\x01' if the admin username & password weren't correct and the user has added.
 """
 
 NUM_OF_BYTES_IN_DATA_SIZE = 4
@@ -67,11 +82,23 @@ NUM_OF_BYTES_IN_MESSAGE_TYPE = 1
 
 BYTE_ORDER = 'big'
 
+CAPTCHA_RESPONSE = CAPTCHA_REQUEST = 0
+CAPTCHA_TEXT_CHECK_RESPONSE = CAPTCHA_TEXT_CHECK_REQUEST = 1
+CREDENTIALS_CHECK_RESPONSE = CREDENTIALS_CHECK_REQUEST = 2
+FACE_IMAGE_CHECK_RESPONSE = FACE_IMAGE_CHECK_REQUEST = 3
+STATISTICS_DATA_RESPONSE = STATISTICS_DATA_REQUEST = 4
+CHANGE_PASSWORD_RESPONSE = CHANGE_PASSWORD_REQUEST = 5
+ADD_IMAGE_RESPONSE = ADD_IMAGE_REQUEST = 6
+ADD_NEW_USER_RESPONSE = ADD_NEW_USER_REQUEST = 7
+
+MAX_USERNAME_LENGTH = MAX_PASSWORD_LENGTH = 30
+MAX_FIRST_NAME_LENGTH = MAX_LAST_NAME_LENGTH = 20
+
 
 def wrap_data(data: bytes, flag: int) -> bytes:
 
     return \
-        to_bytes(len(data), NUM_OF_BYTES_IN_DATA_SIZE) + \
+        to_bytes(len(data) + NUM_OF_BYTES_IN_MESSAGE_TYPE, NUM_OF_BYTES_IN_DATA_SIZE) + \
         to_bytes(flag, NUM_OF_BYTES_IN_MESSAGE_TYPE) + \
         data
 
@@ -84,7 +111,7 @@ def parse_str(data: bytes, num_of_argument_expected: int) -> tuple:
     i = 0
     strings = []
     while i < len(data) and len(strings) < num_of_argument_expected:
-        str_len = int.from_bytes(data[i], 'big')
+        str_len = int.from_bytes(data[i:i + 1], 'big')
         strings.append(
             _bytes_to_str(data[i+1: i+1+str_len]))
         i += 1+str_len
@@ -98,12 +125,3 @@ def parse_str(data: bytes, num_of_argument_expected: int) -> tuple:
 
 def _bytes_to_str(bytes_value: bytes) -> str:
     return str(bytes_value)[2:-1]
-
-
-CAPTCHA_RESPONSE = CAPTCHA_REQUEST = 0
-CAPTCHA_TEXT_CHECK_RESPONSE = CAPTCHA_TEXT_CHECK_REQUEST = 1
-CREDENTIALS_CHECK_RESPONSE = CREDENTIALS_CHECK_REQUEST = 2
-FACE_IMAGE_CHECK_RESPONSE = FACE_IMAGE_CHECK_REQUEST = 3
-STATISTICS_DATA_RESPONSE = STATISTICS_DATA_REQUEST = 4
-CHANGE_PASSWORD_RESPONSE = CHANGE_PASSWORD_REQUEST = 5
-ADD_IMAGE_RESPONSE = ADD_IMAGE_REQUEST = 6

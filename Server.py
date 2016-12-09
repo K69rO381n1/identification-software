@@ -8,8 +8,12 @@ from threading import Thread
 from captcha.audio import AudioCaptcha
 from captcha.image import ImageCaptcha
 
+import DBController
 import TransmissionProtocol
-from DBUtil import DBUtil
+from DBController import *
+
+DEBUG = True
+ADD_TEST_ADMIN = False
 
 CAPTCHA_LENGTH = 6
 CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
@@ -18,72 +22,6 @@ CAPTCHA_ALPHABET = ['z', 'Z', 'y', 'Y', 'x', 'X', 'w', 'W', 'v', 'V',
                     'j', 'J', 'i', 'I', 'h', 'H', 'g', 'G', 'f', 'F',
                     'e', 'E', 'd', 'D', 'c', 'C', 'b', 'B', 'a', 'A',
                     '9', '8', '7', '6', '5', '4', '3', '2', '1', '0']
-
-PASSWORDS_TABLE_DDL = \
-    "CREATE TABLE IF NOT EXISTS passwords" \
-    "(" \
-    "    username VARCHAR(20) PRIMARY KEY NOT NULL," \
-    "    password BIGINT(20)              NOT NULL," \
-    "    CONSTRAINT passwords FOREIGN KEY (username) REFERENCES users (username) " \
-    "    ON DELETE CASCADE ON UPDATE CASCADE" \
-    ");"
-
-LOGIN_STATISTICS_TABLE_DDL = \
-    "CREATE TABLE IF NOT EXISTS login_statistics" \
-    "(" \
-    "    stage               TINYINT(4)  NOT NULL," \
-    "    username            VARCHAR(30) NOT NULL," \
-    "    number_of_failures  INT(11)     NOT NULL," \
-    "    date                DATE        NOT NULL," \
-    "    CONSTRAINT `PRIMARY` PRIMARY KEY (username, stage)," \
-    "    CONSTRAINT login_statistics FOREIGN KEY (username) REFERENCES users (username)" \
-    "    ON DELETE CASCADE ON UPDATE CASCADE" \
-    ");"
-
-USERS_TABLE_DDL = \
-    "CREATE TABLE IF NOT EXISTS users" \
-    "(" \
-    "    first_name VARCHAR(20)             NOT NULL," \
-    "    last_name  VARCHAR(20)             NOT NULL," \
-    "    username   VARCHAR(30)             NOT NULL UNIQUE ," \
-    "    id         BIGINT(20)  PRIMARY KEY NOT NULL" \
-    ");"
-
-USERS_IMAGES_DDL = \
-    "CREATE TABLE IF NOT EXISTS images" \
-    "(" \
-    "    username  VARCHAR(30) NOT NULL," \
-    "    image     LONGBLOB    NOT NULL," \
-    "    CONSTRAINT image FOREIGN KEY (username) REFERENCES users (username)" \
-    "    ON DELETE CASCADE ON UPDATE CASCADE" \
-    ");"
-
-MOST_RECENT_CAPTCHAS_TEXT_DDL = \
-    "CREATE TEMPORARY TABLE captchas_text" \
-    "(" \
-    "    ip           VARCHAR(128) NOT NULL," \
-    "    port         INT          NOT NULL," \
-    "    captcha_text VARCHAR(10)  NOT NULL," \
-    "    CONSTRAINT client_address PRIMARY KEY (ip, port)" \
-    ")"
-
-INSERT_IMAGE_QUERY = \
-    "INSERT INTO images (username, image) VALUES (@0, @1)"
-
-UPDATE_PASSWORD_QUERY = \
-    "UPDATE passwords SET password=@0 WHERE username=@1"
-
-GET_CAPTCHA_TEXT = \
-    "SELECT captcha_text FROM captchas_text WHERE ip=@0 AND port=@1"
-
-GET_PASSWORD_QUERY = \
-    "SELECT password FROM passwords WHERE username = @0"
-
-GET_ALL_IMAGES_QUERY = \
-    "SELECT image FROM images WHERE username=@0"
-
-GET_ALL_STATISTICS_DATA_QUERY = \
-    "SELECT * FROM login_statistics"
 
 BIND_IP = 'localhost'
 BIND_PORT = 9999
@@ -111,11 +49,12 @@ FONTS = [FONTS_DIR + font for font in listdir(FONTS_DIR)]
 
 
 class MainServer(socket.socket):
+
     def __init__(self):
         super(MainServer, self).__init__(socket.AF_INET, socket.SOCK_STREAM)
 
         # Getting a connection to the DB.
-        self.db = DBUtil(DB_CONFIG)
+        self.db = DBController.DBController(DB_CONFIG)
 
         # Creating the necessary tables. for more information see the DDLs above...
         self.create_tables()
@@ -140,31 +79,52 @@ class MainServer(socket.socket):
         # starting a new thread that accepts new clients
         Thread(target=self.accept_clients).start()
 
+        if DEBUG:
+            print('\n\n******************** Server is on air ************************\n\n')
+
+        user_input = input()
+        if user_input == 'quit':
+            self.close()
+
     def accept_clients(self):
         try:
-            while not self._closed:
+            while True:
                 client_socket, client_address = self.accept()
-                print('Accept client: {}'.format(client_address))
+                if DEBUG:
+                    print('Accept client: {}'.format(client_address))
                 self.socket_to_address_dict[client_socket] = client_address
                 Thread(target=self.handle_client, args=(client_socket,)).start()
         except OSError:
             pass
 
+        finally:
+            self.close()
+
     def handle_client(self, client: socket.socket):
-        print('Start handling {}'.format(client.getsockname()))
+
+        if DEBUG:
+            print('Start handling {}'.format(client.getsockname()), end='\n\n')
+
         try:
+            def _send_bool(boolean, server_flag):
+                MainServer._sendto(client, TransmissionProtocol.to_bytes(boolean, 1), server_flag)
+
             while True:
                 client_input = MainServer._recvfrom(client)
-                print('Receive input: {}'.format(client_input))
                 flag = client_input[0]
                 data = client_input[1:]
-                print('flag {} & data {}'.format(flag, data))
+                if DEBUG:
+                    print('Receive from {} data{} with flag {}'
+                          .format(self.socket_to_address_dict[client], flag, client_input))
+
                 if flag == TransmissionProtocol.CAPTCHA_REQUEST:
-                    print('sending captcha')
+                    captcha_text = MainServer._random_text(CAPTCHA_LENGTH)
+                    self.db.execute_query(DBController.SET_CAPTCHA_TEXT, *self.socket_to_address_dict[client],
+                                          captcha_text)
+
                     MainServer._sendto(client,
-                                       self.generate_captcha(),
+                                       self.generate_captcha(MainServer._space_text(captcha_text)),
                                        TransmissionProtocol.CAPTCHA_RESPONSE)
-                    print('finish')
 
                 elif flag == TransmissionProtocol.CAPTCHA_TEXT_CHECK_REQUEST:
                     MainServer._sendto(client,
@@ -174,7 +134,7 @@ class MainServer(socket.socket):
 
                 elif flag == TransmissionProtocol.CREDENTIALS_CHECK_REQUEST:
                     MainServer._sendto(client,
-                                       TransmissionProtocol.to_bytes(self.validate_password(
+                                       TransmissionProtocol.to_bytes(self.validate_password_and_authorizations(
                                            *TransmissionProtocol.parse_str(data, 2)), 1),
                                        TransmissionProtocol.CREDENTIALS_CHECK_RESPONSE)
 
@@ -189,69 +149,111 @@ class MainServer(socket.socket):
                 elif flag == TransmissionProtocol.CHANGE_PASSWORD_REQUEST:
                     username, old_password, new_password = TransmissionProtocol.parse_str(data, 3)
 
-                    if self.validate_password(username, old_password):
-                        self.db.execute_query(UPDATE_PASSWORD_QUERY, new_password, username)
-                        MainServer._sendto(client, TransmissionProtocol.to_bytes(True, 1),
-                                           TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
+                    if self.validate_password_and_authorizations(username, old_password):
+                        self.db.execute_query(DBController.SET_PASSWORD_QUERY, new_password, username)
+                        _send_bool(True, TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
                     else:
-                        MainServer._sendto(client, TransmissionProtocol.to_bytes(False, 1),
-                                           TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
+                        _send_bool(False, TransmissionProtocol.CHANGE_PASSWORD_RESPONSE)
 
                 elif flag == TransmissionProtocol.ADD_IMAGE_REQUEST:
                     username, password, image = TransmissionProtocol.parse_str(data, 2)
 
-                    if self.validate_password(username, password):
-                        self.db.execute_query(INSERT_IMAGE_QUERY, username, image)
-                        MainServer._sendto(client, TransmissionProtocol.to_bytes(True, 1),
-                                           TransmissionProtocol.ADD_IMAGE_RESPONSE)
+                    if self.validate_password_and_authorizations(username, password):
+                        self.db.execute_query(DBController.INSERT_IMAGE_QUERY, username, image)
+                        _send_bool(True, TransmissionProtocol.ADD_IMAGE_RESPONSE)
                     else:
-                        MainServer._sendto(client, TransmissionProtocol.to_bytes(False, 1),
-                                           TransmissionProtocol.ADD_IMAGE_RESPONSE)
+                        _send_bool(False, TransmissionProtocol.ADD_IMAGE_RESPONSE)
+
+                elif flag == TransmissionProtocol.ADD_NEW_USER_REQUEST:
+                    admin_username, admin_password, \
+                    first_name, last_name, username, password, num_data = \
+                        TransmissionProtocol.parse_str(data, 6)
+                    user_id = int.from_bytes(num_data[:4], 'big')
+                    permission = num_data[4:]
+
+                    if self.validate_password_and_authorizations(admin_username, admin_username, permission) and \
+                                    len(first_name) < TransmissionProtocol.MAX_FIRST_NAME_LENGTH and \
+                                    len(last_name) < TransmissionProtocol.MAX_LAST_NAME_LENGTH and \
+                                    len(username) < TransmissionProtocol.MAX_USERNAME_LENGTH and \
+                                    len(password) < TransmissionProtocol.MAX_PASSWORD_LENGTH and \
+                                    permission in PERMISSIONS:
+
+                        self.db.execute_query(DBController.INSERT_NEW_USER, first_name, last_name, username, user_id)
+                        self.db.execute_query(DBController.SET_PASSWORD_QUERY, username, password)
+                        self.db.execute_query(DBController.SET_PERMISSION_QUERY, username, permission)
+                        _send_bool(True, TransmissionProtocol.ADD_NEW_USER_RESPONSE)
+                    else:
+                        _send_bool(False, TransmissionProtocol.ADD_NEW_USER_RESPONSE)
+
+                else:
+                    raise Exception('Not supported flag {}!'.format(flag))
+
+        except ConnectionResetError:
+            pass
 
         finally:
+            if DEBUG:
+                print("Close {}'s connection".format(client.getsockname()))
             client.close()
 
-    def generate_captcha(self):
+    def generate_captcha(self, text):
 
-        return self.captcha_image_generator.generate(
-            MainServer._space_text(MainServer._random_text(CAPTCHA_LENGTH)),
-            format='png').read()
+        return self.captcha_image_generator.generate(text, format='png').read()
 
-    def validate_password(self, username: str, password: str) -> bool:
-        password_from_db = next(self.db.execute_query(GET_PASSWORD_QUERY, username))
-        return password_from_db == password
+    def validate_password_and_authorizations(self, username: str, password: str, permission: int = None) -> bool:
+        try:
+            encrypted_password_from_db = next(self.db.execute_query(DBController.GET_PASSWORD_QUERY, username))
+            permission_from_db = next(self.db.execute_query(DBController.GET_USER_PERMISSION, username))
+
+        except StopIteration:
+            return False
+
+        return encrypted_password_from_db == MainServer._encrypt(password) and \
+               (True if permission is None else permission_from_db == permission)
 
     def check_user_captcha_guess(self, client: socket.socket, guess_text: str):
-        captcha_text = self.db.execute_query(GET_CAPTCHA_TEXT, *self.socket_to_address_dict[client])
+        captcha_text = self.db.execute_query(DBController.GET_CAPTCHA_TEXT, *self.socket_to_address_dict[client])
         return captcha_text == guess_text
 
     def create_tables(self):
 
-        TABLES = {}
+        tables = {
+            'users': (
+                USERS_TABLE_DDL
+            ),
+            'login_statistics': (
+                LOGIN_STATISTICS_TABLE_DDL
+            ),
+            'passwords': (
+                PASSWORDS_TABLE_DDL
+            ),
+            'captchas_text': (
+                MOST_RECENT_CAPTCHAS_TEXT_DDL
+            ),
+            'authorizations': (
+                USER_AUTHORIZATION_DDL
+            )}
 
-        TABLES['users'] = (
-            USERS_TABLE_DDL
-        )
+        self.db.create_tables(tables)
 
-        TABLES['login_statistics'] = (
-            LOGIN_STATISTICS_TABLE_DDL
-        )
-
-        TABLES['passwords'] = (
-            PASSWORDS_TABLE_DDL
-        )
-
-        TABLES['captchas_text'] = (
-            MOST_RECENT_CAPTCHAS_TEXT_DDL
-        )
-
-        self.db.create_tables(TABLES)
+        if ADD_TEST_ADMIN:
+            self.db.execute_query(INSERT_NEW_USER, 'John', 'Doe', 'admin', '0123456789')
+            self.db.execute_query(SET_PASSWORD_QUERY, 'admin', 'password')
+            self.db.execute_query(SET_PERMISSION_QUERY, 'admin', ADMIN)
 
     # ************************************** Override methods ***********************************
 
     def close(self):
+        """
+        Deallocate the socket and db cached memory.
+        """
+        for client_socket in self.socket_to_address_dict.keys():
+            client_socket.close()
         super(socket.socket, self).close()
         self.db.close()
+
+        if DEBUG:
+            print('\n\n******************** Server is down ************************\n\n')
 
     # ************************************** Static functions ***********************************
 
@@ -264,10 +266,17 @@ class MainServer(socket.socket):
         :param client:  The data's addressee
         :param data:    This data will be send to the client.
         """
+        if DEBUG:
+            print(
+                "Sending packet:\n"
+                "   Flag: {}\n"
+                "   Data: {}".format(flag, data),
+                end='\n\n'
+            )
 
-        total_sent = 0
         packet = TransmissionProtocol.wrap_data(data, flag)
 
+        total_sent = 0
         while total_sent < len(packet):
             total_sent += client.send(
                 packet[total_sent: min(
@@ -276,15 +285,15 @@ class MainServer(socket.socket):
     @staticmethod
     def _recvfrom(client: socket.socket) -> bytes:
         """
-        This method receives from the client data and unwrap it using the protocol defined in file PocketProtocol.
+        This method receives from the client some data and unwrap it using the protocol defined in file PocketProtocol.
         NOTE: Any data receiving from clients should be though this method!
 
         :param client:  The data's sender.
         """
-
         data = b''
         size = int.from_bytes(client.recv(
             TransmissionProtocol.NUM_OF_BYTES_IN_DATA_SIZE), 'big') + TransmissionProtocol.NUM_OF_BYTES_IN_MESSAGE_TYPE
+
         while len(data) < size:
             data += client.recv(
                 min(
@@ -294,20 +303,36 @@ class MainServer(socket.socket):
 
     @staticmethod
     def _random_text(size: int) -> str:
+        """
+        :param size: The size of the random str.
+        :return:     Random string contain characters from CAPTCHA_CAPTCHA_ALPHABET only.
+        """
         return "".join([choice(CAPTCHA_ALPHABET) for _ in range(size)])
 
     @staticmethod
-    def encrypt(password: str):
+    def _encrypt(password: str):
+        """
+        :param password:
+        :return:    Hash
+        """
         return hash(hash(HASH_PREFIX + password + HASH_SUFFIX))
 
     @staticmethod
     def _round_to_lower_power_of_2(buffer_size: int):
+        """
+        :param buffer_size: The suprimum to the power of 2.
+        :return:    The biggest power of 2 that is lower then $buffer_size
+        """
         return 1 << (buffer_size.bit_length() - 1)
 
     @staticmethod
     def _space_text(text: str):
+        """
+        :param text:    The text to be spaced.
+        :return:        $text's characters separated with white space.
+        """
         return " ".join(text)
 
 
 if __name__ == '__main__':
-    a = MainServer()
+    MainServer()
